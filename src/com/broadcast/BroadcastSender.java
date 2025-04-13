@@ -1,41 +1,90 @@
 package com.broadcast;
 
-import java.net.*;
 import java.io.*;
+import java.net.*;
 
 public class BroadcastSender {
 
     public static void main(String[] args) {
-        DatagramSocket socket = null;
+        String filePath = "E:\\xulyanh.pdf"; // Đường dẫn tệp muốn chia sẻ
+        int udpPort = 12345;                // Cổng gửi broadcast
+        int tcpPort = 23456;                // Cổng truyền tệp
 
         try {
-            // Tạo socket UDP
-            socket = new DatagramSocket();
+            File file = new File(filePath);
+            if (!file.exists()) {
+                System.err.println("❌ File không tồn tại: " + filePath);
+                return;
+            }
 
-            // Cho phép gửi gói tin broadcast
-            socket.setBroadcast(true);
+            String fileName = file.getName();
+            long fileSize = file.length();
 
-            // Địa chỉ broadcast trong mạng LAN (ví dụ: 255.255.255.255)
-            InetAddress broadcastAddress = InetAddress.getByName("255.255.255.255");
-            int port = 12345;  // Cổng để gửi gói tin
+            // Đặt IP tĩnh của máy thật (Windows) - Sửa lại
+            String localIP = "192.168.1.9"; // Thay IP này bằng IP của máy Windows
 
-            // Gửi thông điệp
-            String message = "Hello, this is a broadcast message!";
+            // Gửi thông điệp broadcast: TênFile;KíchThước;IP;CổngTCP
+            String message = fileName + ";" + fileSize + ";" + localIP + ";" + tcpPort;
             byte[] buffer = message.getBytes();
 
-            // Tạo gói tin Datagram
-            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, broadcastAddress, port);
+            // Gửi qua UDP broadcast
+            DatagramSocket udpSocket = new DatagramSocket();
+            udpSocket.setBroadcast(true);
+            InetAddress broadcastAddress = InetAddress.getByName("192.168.1.255");
 
-            // Gửi gói tin
-            socket.send(packet);
-            System.out.println("Broadcast message sent.");
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, broadcastAddress, udpPort);
+            udpSocket.send(packet);
+            System.out.println("📢 Đã gửi broadcast thông báo tệp tin!");
+            udpSocket.close();
 
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            if (socket != null && !socket.isClosed()) {
-                socket.close();
+            // Bắt đầu TCP Server
+            ServerSocket serverSocket = new ServerSocket(tcpPort);
+            System.out.println("🧩 Đang chờ client yêu cầu tải file...");
+
+            while (true) {
+                Socket clientSocket = serverSocket.accept();
+                System.out.println("🔁 Client đã kết nối: " + clientSocket.getInetAddress());
+
+                // Thiết lập timeout cho socket
+                clientSocket.setSoTimeout(10000); // 10 giây
+
+                new Thread(() -> handleClient(clientSocket, file)).start();
             }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Gửi file cho client
+    private static void handleClient(Socket clientSocket, File file) {
+        try {
+            FileInputStream fis = new FileInputStream(file);
+            OutputStream os = clientSocket.getOutputStream();
+
+            byte[] fileBuffer = new byte[4096];
+            int bytesRead;
+
+            while ((bytesRead = fis.read(fileBuffer)) != -1) {
+                os.write(fileBuffer, 0, bytesRead);
+            }
+
+            os.flush();
+            fis.close();
+            clientSocket.close();
+            System.out.println("✅ Đã gửi file xong cho: " + clientSocket.getInetAddress());
+
+        } catch (SocketTimeoutException e) {
+            System.err.println("⏰ TIMEOUT: Client không phản hồi kịp - " + clientSocket.getInetAddress());
+            try {
+                clientSocket.close();
+            } catch (IOException ex) {
+                ex.printStackTrace();
+            }
+
+        } catch (IOException e) {
+            System.err.println("❌ Lỗi khi gửi file cho client: " + clientSocket.getInetAddress());
+            e.printStackTrace();
         }
     }
 }
